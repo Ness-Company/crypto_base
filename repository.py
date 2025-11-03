@@ -57,18 +57,24 @@ class BaseRepository(Generic[T]):
 
         return self.session.exec(query).all() if exec_query else query
 
-    def get_paginated(self, query: Select[T], limit: int = 20, page: int = 1) -> dict:
-        total_pages = (
-            math.ceil(self.session.exec(select(func.count()).select_from(query.subquery())).one() / limit)
-            if limit
-            else 1
-        )
+    def get_paginated(
+        self,
+        query: Select[T],
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict:
+        limit = max(limit or 1, 1)
+        page = max(page or 1, 1)
+
+        total_count = self.session.exec(select(func.count()).select_from(query.subquery())).one()
+        total_pages = math.ceil(total_count / limit)
 
         return {
             "items": self.session.exec(query.offset((page - 1) * limit).limit(limit)).all(),
-            "next_page": page + 1 if page < total_pages else None,
+            "next_page": page + 1 if total_pages and page < total_pages else None,
             "prev_page": page - 1 if page > 1 else None,
             "total_pages": total_pages,
+            "total_count": total_count,
         }
 
     def _add(self, instance: T) -> T:

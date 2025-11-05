@@ -152,7 +152,7 @@ class AsyncBaseRepository(Generic[T]):
         exec_query: bool = True,
         order_by: Optional[str | list[str]] = None,
         **filters,
-    ):
+    ) -> list[T] | Select[tuple[T]]:
         query = select(self.model)
 
         if filters:
@@ -207,7 +207,7 @@ class AsyncBaseRepository(Generic[T]):
 
         return instance
 
-    def _order_by(self, query, order_by=None):
+    def _order_by(self, query: Select[T], order_by: Optional[str | list[str]] = None) -> Select[T]:
         if not order_by:
             return query
 

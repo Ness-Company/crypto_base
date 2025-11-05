@@ -133,6 +133,18 @@ class AsyncBaseRepository(Generic[T]):
     async def create(self, instance: T) -> T:
         return await self._add(instance)
 
+    async def bulk_create(self, instances: list[T]) -> list[T]:
+        try:
+            self.session.add_all(instances)
+            await self.session.commit()
+            for instance in instances:
+                await self.session.refresh(instance)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+        return instances
+
     async def update(self, instance: T, **update_kwargs) -> T:
         if hasattr(instance, "updated_at"):
             instance.updated_at = dt.now(tz.utc)

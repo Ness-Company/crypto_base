@@ -61,13 +61,20 @@ class BaseRepository(Generic[T]):
     def get_paginated(
         self,
         query: Select[T],
+        count_select_query: Select[int] = None,
         limit: int = 20,
         page: int = 1,
     ) -> dict:
         limit = max(limit or 1, 1)
         page = max(page or 1, 1)
 
-        total_count = self.session.exec(select(func.count()).select_from(query.subquery())).one()
+        # TODO -> Add optional caching for total_count
+        count_select_query = query if count_select_query is None else count_select_query
+        total_count = self.session.exec(
+            select(func.count()).select_from(
+                count_select_query.with_only_columns(self.model.id).order_by(None).subquery()
+            )
+        ).one()
         total_pages = math.ceil(total_count / limit)
 
         return {

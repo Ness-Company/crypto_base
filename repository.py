@@ -1,7 +1,8 @@
 from datetime import datetime as dt
 from datetime import timezone as tz
 import math
-from typing import ClassVar, Generic, Optional, TypeVar
+import enum
+from typing import Any, ClassVar, Generic, Optional, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select, desc, asc
@@ -36,7 +37,13 @@ class BaseRepository(Generic[T]):
         return self.session.exec(select(self.model).where(self.model.id == instance_id)).first()
 
     def get_all(
-        self, exec_query: bool = True, order_by: Optional[str | list[str]] = None, **filters
+        self,
+        exec_query: bool = True,
+        order_by: Optional[str | list[str]] = None,
+        joins: Optional[list[tuple[type[SQLModel], Any]]] = None,
+        join_filters: Optional[dict[type[SQLModel], dict[str, Any]]] = None,
+        select_fields: Optional[list[Any]] = None,
+        **filters,
     ) -> list[T] | Select[tuple[T]]:
         """
         Fetch all instances with optional filters and ordering.
@@ -44,15 +51,24 @@ class BaseRepository(Generic[T]):
                     prefix '-' for descending.
         If exec_query=True, returns list[T]; otherwise, returns unexecuted Select.
         """
-        query = select(self.model)
+        query = select(self.model, *select_fields) if select_fields else select(self.model)
+        if joins:
+            for model, onclause in joins:
+                query = query.join(model, onclause)
+
         if filters:
-            where_clauses = [
-                getattr(self.model, field) == value
-                for field, value in filters.items()
-                if hasattr(self.model, field) and value is not None
-            ]
+            where_clauses = []
+            for field, value in filters.items():
+                if isinstance(value, enum.Enum):
+                    value = value.value
+                if hasattr(self.model, field) and value is not None:
+                    where_clauses.append(getattr(self.model, field) == value)
             if where_clauses:
                 query = query.where(*where_clauses)
+
+        if join_filters:
+            for model, jf in join_filters.items():
+                query = self._filter_query(query, model=model, **{k: v for k, v in jf.items() if v is not None})
 
         query = self._order_by(query, order_by)
 
@@ -70,11 +86,7 @@ class BaseRepository(Generic[T]):
 
         # TODO -> Add optional caching for total_count
         count_select_query = query if count_select_query is None else count_select_query
-        total_count = self.session.exec(
-            select(func.count()).select_from(
-                count_select_query.with_only_columns(self.model.id).order_by(None).subquery()
-            )
-        ).one()
+        total_count = self.session.exec(select(func.count()).select_from(count_select_query.subquery())).one()
         total_pages = math.ceil(total_count / limit)
 
         return {
@@ -100,13 +112,14 @@ class BaseRepository(Generic[T]):
         model = model or self.model
 
         if filters:
-            filters = [
-                getattr(model, field) == value
-                for field, value in filters.items()
-                if hasattr(model, field) and value is not None
-            ]
-            if filters:
-                query = query.where(*filters)
+            clauses = []
+            for field, value in filters.items():
+                if isinstance(value, enum.Enum):
+                    value = value.value
+                if hasattr(model, field) and value is not None:
+                    clauses.append(getattr(model, field) == value)
+            if clauses:
+                query = query.where(*clauses)
 
         return query
 
@@ -175,11 +188,12 @@ class AsyncBaseRepository(Generic[T]):
         query = select(self.model)
 
         if filters:
-            where_clauses = [
-                getattr(self.model, field) == value
-                for field, value in filters.items()
-                if hasattr(self.model, field) and value is not None
-            ]
+            where_clauses = []
+            for field, value in filters.items():
+                if isinstance(value, enum.Enum):
+                    value = value.value
+                if hasattr(self.model, field) and value is not None:
+                    where_clauses.append(getattr(self.model, field) == value)
             if where_clauses:
                 query = query.where(*where_clauses)
 

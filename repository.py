@@ -114,8 +114,6 @@ class BaseRepository(Generic[T]):
         if filters:
             clauses = []
             for field, value in filters.items():
-                if isinstance(value, enum.Enum):
-                    value = value.value
                 if hasattr(model, field) and value is not None:
                     clauses.append(getattr(model, field) == value)
             if clauses:

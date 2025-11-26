@@ -56,16 +56,7 @@ class BaseRepository(Generic[T]):
             for model, onclause in joins:
                 query = query.join(model, onclause)
 
-        if filters:
-            where_clauses = []
-            for field, value in filters.items():
-                if isinstance(value, enum.Enum):
-                    value = value.value
-                if hasattr(self.model, field) and value is not None:
-                    where_clauses.append(getattr(self.model, field) == value)
-            if where_clauses:
-                query = query.where(*where_clauses)
-
+        self._filter_query(query, **filters)
         if join_filters:
             for model, jf in join_filters.items():
                 query = self._filter_query(query, model=model, **{k: v for k, v in jf.items() if v is not None})

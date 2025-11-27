@@ -1,6 +1,9 @@
+from alembic import context
+
+
 def include_object(object, name, type_, reflected, compare_to):
     """
-    An util for Alembic to determine whether an object should be included based on its type and schema.
+    Utility for Alembic to decide whether to include an object according to its type and schema.
 
     Args:
         object: The object to be evaluated.
@@ -11,10 +14,7 @@ def include_object(object, name, type_, reflected, compare_to):
 
     Returns:
         bool: True if the object should be included, False otherwise.
-              Specifically, returns False for tables not in the "listeners" schema,
-              and True for all other cases.
+              Specifically, returns False for tables whose schema does not match
+              the schema specified via Alembic's x-argument, and True for all other cases.
     """
-    if type_ == "table" and object.schema != "listeners":
-        return False
-
-    return True
+    return not (type_ == "table" and object.schema != context.get_x_argument(as_dictionary=True).get("schema", None))

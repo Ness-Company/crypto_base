@@ -32,6 +32,16 @@ class BaseRepository(Generic[T]):
     def create(self, instance: T) -> T:
         return self._add(instance)
 
+    def bulk_create(self, instances: list[T]) -> list[T]:
+        try:
+            self.session.add_all(instances)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+        return instances
+
     def update(self, instance: T, **update_kwargs) -> T:
         if hasattr(instance, "updated_at"):
             instance.updated_at = dt.now(tz.utc)

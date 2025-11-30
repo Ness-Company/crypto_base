@@ -5,11 +5,22 @@ import enum
 from typing import Any, ClassVar, Generic, Optional, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import Select, desc, asc
+from sqlalchemy.sql import Select, desc, asc, false
 from sqlmodel import Session, SQLModel, func, select
 
 
 T = TypeVar("T", bound=SQLModel)
+
+
+class In(Generic[T]):
+    def __init__(self, items: list[T]):
+        self.items = items
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def __repr__(self):
+        return f"In({self.items})"
 
 
 class BaseRepository(Generic[T]):
@@ -43,8 +54,9 @@ class BaseRepository(Generic[T]):
         joins: Optional[list[tuple[type[SQLModel], Any]]] = None,
         join_filters: Optional[dict[type[SQLModel], dict[str, Any]]] = None,
         select_fields: Optional[list[Any]] = None,
+        columns: Optional[list] = None,
         **filters,
-    ) -> list[T] | Select[tuple[T]]:
+    ) -> list[T] | Select[tuple[T]] | list:
         """
         Fetch all instances with optional filters and ordering.
         - order_by: a string or list of strings like 'created_at' or '-id'
@@ -52,11 +64,15 @@ class BaseRepository(Generic[T]):
         If exec_query=True, returns list[T]; otherwise, returns unexecuted Select.
         """
         query = select(self.model, *select_fields) if select_fields else select(self.model)
+
+        if columns:
+            query = query.with_only_columns(*columns)
+
         if joins:
             for model, onclause in joins:
                 query = query.join(model, onclause)
 
-        self._filter_query(query, **filters)
+        query = self._filter_query(query, **filters)
         if join_filters:
             for model, jf in join_filters.items():
                 query = self._filter_query(query, model=model, **{k: v for k, v in jf.items() if v is not None})
@@ -100,17 +116,28 @@ class BaseRepository(Generic[T]):
         return instance
 
     def _filter_query(self, query: Select[T], model=None, **filters) -> Select[T]:
-        model = model or self.model
-
         if filters:
-            clauses = []
-            for field, value in filters.items():
-                if hasattr(model, field) and value is not None:
-                    clauses.append(getattr(model, field) == value)
+            clauses = self._filter_clauses(model or self.model, **filters)
             if clauses:
                 query = query.where(*clauses)
 
         return query
+
+    def _filter_clauses(self, model, **filters) -> list:
+        clauses = []
+        for field, value in filters.items():
+            if hasattr(model, field) and value is not None:
+                column = getattr(model, field)
+                if isinstance(value, In):
+                    if not value.items:
+                        clauses.append(false())
+                        continue
+                    clause = column.in_(value.items)
+                else:
+                    clause = column == value
+                clauses.append(clause)
+
+        return clauses
 
     def _order_by(self, query: Select[T], order_by: Optional[str | list[str]] = None) -> Select[T]:
         if not order_by:

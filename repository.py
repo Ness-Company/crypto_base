@@ -23,6 +23,18 @@ class In(Generic[T]):
         return f"In({self.items})"
 
 
+class Like:
+    def __init__(self, pattern: str):
+        self.pattern = pattern
+
+    def __repr__(self):
+        return f"Like({self.pattern!r})"
+
+
+class ILike(Like):
+    pass
+
+
 class BaseRepository(Generic[T]):
     model: ClassVar[Optional[type[T]]] = None
 
@@ -143,6 +155,10 @@ class BaseRepository(Generic[T]):
                         clauses.append(false())
                         continue
                     clause = column.in_(value.items)
+                elif isinstance(value, ILike):
+                    clause = column.ilike(value.pattern)
+                elif isinstance(value, Like):
+                    clause = column.like(value.pattern)
                 else:
                     clause = column == value
                 clauses.append(clause)

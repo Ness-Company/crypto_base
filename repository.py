@@ -33,12 +33,12 @@ class Like:
 
 
 class Between:
-    def __init__(self, start: dt, end: dt):
-        self.start = start
-        self.end = end
+    def __init__(self, min: dt, max: dt):
+        self.min = min
+        self.max = max
 
     def __repr__(self):
-        return f"Between({self.start!r}, {self.end!r})"
+        return f"Between({self.min!r}, {self.max!r})"
 
 
 class ILike(Like):
@@ -171,10 +171,10 @@ class BaseRepository(Generic[T]):
                     clause = column.like(value.pattern)
                 elif isinstance(value, Between):
                     conditions = []
-                    if value.start is not None:
-                        conditions.append(column >= value.start)
-                    if value.end is not None:
-                        conditions.append(column <= value.end)
+                    if value.min is not None:
+                        conditions.append(column >= value.min)
+                    if value.max is not None:
+                        conditions.append(column <= value.max)
                     clause = and_(*conditions)
                 else:
                     clause = column == value

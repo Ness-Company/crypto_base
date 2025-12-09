@@ -4,6 +4,7 @@ import math
 import enum
 from typing import Any, ClassVar, Generic, Optional, TypeVar
 
+from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select, desc, asc, false
 from sqlmodel import Session, SQLModel, func, select
@@ -29,6 +30,15 @@ class Like:
 
     def __repr__(self):
         return f"Like({self.pattern!r})"
+
+
+class Between:
+    def __init__(self, start: dt, end: dt):
+        self.start = start
+        self.end = end
+
+    def __repr__(self):
+        return f"Between({self.start!r}, {self.end!r})"
 
 
 class ILike(Like):
@@ -159,6 +169,13 @@ class BaseRepository(Generic[T]):
                     clause = column.ilike(value.pattern)
                 elif isinstance(value, Like):
                     clause = column.like(value.pattern)
+                elif isinstance(value, Between):
+                    conditions = []
+                    if value.start is not None:
+                        conditions.append(column >= value.start)
+                    if value.end is not None:
+                        conditions.append(column <= value.end)
+                    clause = and_(*conditions)
                 else:
                     clause = column == value
                 clauses.append(clause)

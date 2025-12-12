@@ -1,4 +1,4 @@
-from datetime import datetime as dt
+from datetime import date, datetime as dt
 from datetime import timezone as tz
 import math
 import enum
@@ -32,8 +32,11 @@ class Like:
         return f"Like({self.pattern!r})"
 
 
+BETWEEN_BOUND = float | int | dt | str | None | date
+
+
 class Between:
-    def __init__(self, min: dt, max: dt):
+    def __init__(self, min: BETWEEN_BOUND, max: BETWEEN_BOUND):
         self.min = min
         self.max = max
 

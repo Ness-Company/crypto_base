@@ -1,6 +1,5 @@
 from datetime import date, datetime as dt, timezone as tz
 import math
-import enum
 from typing import Any, ClassVar, Generic, Optional, TypeVar
 
 from sqlalchemy import and_
@@ -47,12 +46,70 @@ class ILike(Like):
     pass
 
 
-class BaseRepository(Generic[T]):
+class BaseRepositoryMixin:
     model: ClassVar[Optional[type[T]]] = None
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session | AsyncSession):
         self.session = session
 
+    def _filter_query(self, query: Select[T], model=None, **filters) -> Select[T]:
+        if filters:
+            clauses = self._filter_clauses(model or self.model, **filters)
+            if clauses:
+                query = query.where(*clauses)
+
+        return query
+
+    def _filter_clauses(self, model, **filters) -> list:
+        clauses = []
+        for field, value in filters.items():
+            if hasattr(model, field) and value is not None:
+                column = getattr(model, field)
+                if isinstance(value, In):
+                    if not value.items:
+                        clauses.append(false())
+                        continue
+                    clause = column.in_(value.items)
+                elif isinstance(value, ILike):
+                    clause = column.ilike(value.pattern)
+                elif isinstance(value, Like):
+                    clause = column.like(value.pattern)
+                elif isinstance(value, Between):
+                    conditions = []
+                    if value.min is not None:
+                        conditions.append(column >= value.min)
+                    if value.max is not None:
+                        conditions.append(column <= value.max)
+                    clause = and_(*conditions)
+                else:
+                    clause = column == value
+                clauses.append(clause)
+
+        return clauses
+
+    def _order_by(self, query: Select[T], order_by: Optional[str | list[str]] = None) -> Select[T]:
+        if not order_by:
+            return query
+
+        if isinstance(order_by, str):
+            order_by = [order_by]
+
+        order_expressions = []
+        for field in order_by:
+            if not field:
+                continue
+
+            descending = field.startswith("-")
+            field_name = field[1:] if descending else field
+
+            if hasattr(self.model, field_name):
+                column = getattr(self.model, field_name)
+                order_expressions.append(desc(column) if descending else asc(column))
+
+        return query.order_by(*order_expressions) if order_expressions else query
+
+
+class BaseRepository(Generic[T], BaseRepositoryMixin):
     def create(self, instance: T) -> T:
         return self._add(instance)
 
@@ -149,68 +206,8 @@ class BaseRepository(Generic[T]):
 
         return instance
 
-    def _filter_query(self, query: Select[T], model=None, **filters) -> Select[T]:
-        if filters:
-            clauses = self._filter_clauses(model or self.model, **filters)
-            if clauses:
-                query = query.where(*clauses)
 
-        return query
-
-    def _filter_clauses(self, model, **filters) -> list:
-        clauses = []
-        for field, value in filters.items():
-            if hasattr(model, field) and value is not None:
-                column = getattr(model, field)
-                if isinstance(value, In):
-                    if not value.items:
-                        clauses.append(false())
-                        continue
-                    clause = column.in_(value.items)
-                elif isinstance(value, ILike):
-                    clause = column.ilike(value.pattern)
-                elif isinstance(value, Like):
-                    clause = column.like(value.pattern)
-                elif isinstance(value, Between):
-                    conditions = []
-                    if value.min is not None:
-                        conditions.append(column >= value.min)
-                    if value.max is not None:
-                        conditions.append(column <= value.max)
-                    clause = and_(*conditions)
-                else:
-                    clause = column == value
-                clauses.append(clause)
-
-        return clauses
-
-    def _order_by(self, query: Select[T], order_by: Optional[str | list[str]] = None) -> Select[T]:
-        if not order_by:
-            return query
-
-        if isinstance(order_by, str):
-            order_by = [order_by]
-
-        order_expressions = []
-        for field in order_by:
-            if not field:
-                continue
-
-            descending = field.startswith("-")
-            field_name = field[1:] if descending else field
-            if hasattr(self.model, field_name):
-                column = getattr(self.model, field_name)
-                order_expressions.append(desc(column) if descending else asc(column))
-
-        return query.order_by(*order_expressions) if order_expressions else query
-
-
-class AsyncBaseRepository(Generic[T]):
-    model: ClassVar[Optional[type[T]]] = None
-
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class AsyncBaseRepository(Generic[T], BaseRepositoryMixin):
     async def create(self, instance: T) -> T:
         return await self._add(instance)
 
@@ -244,19 +241,25 @@ class AsyncBaseRepository(Generic[T]):
         self,
         exec_query: bool = True,
         order_by: Optional[str | list[str]] = None,
+        joins: Optional[list[tuple[type[SQLModel], Any]]] = None,
+        join_filters: Optional[dict[type[SQLModel], dict[str, Any]]] = None,
+        select_fields: Optional[list[Any]] = None,
+        columns: Optional[list] = None,
         **filters,
-    ) -> list[T] | Select[tuple[T]]:
-        query = select(self.model)
+    ) -> list[T] | Select[tuple[T]] | list:
+        query = select(self.model, *select_fields) if select_fields else select(self.model)
 
-        if filters:
-            where_clauses = []
-            for field, value in filters.items():
-                if isinstance(value, enum.Enum):
-                    value = value.value
-                if hasattr(self.model, field) and value is not None:
-                    where_clauses.append(getattr(self.model, field) == value)
-            if where_clauses:
-                query = query.where(*where_clauses)
+        if columns:
+            query = query.with_only_columns(*columns)
+
+        if joins:
+            for model, onclause in joins:
+                query = query.join(model, onclause)
+
+        query = self._filter_query(query, **filters)
+        if join_filters:
+            for model, jf in join_filters.items():
+                query = self._filter_query(query, model=model, **{k: v for k, v in jf.items() if v is not None})
 
         query = self._order_by(query, order_by)
 
@@ -300,20 +303,3 @@ class AsyncBaseRepository(Generic[T]):
             raise
 
         return instance
-
-    def _order_by(self, query: Select[T], order_by: Optional[str | list[str]] = None) -> Select[T]:
-        if not order_by:
-            return query
-
-        if isinstance(order_by, str):
-            order_by = [order_by]
-
-        for field in order_by:
-            descending = field.startswith("-")
-            field_name = field[1:] if descending else field
-
-            if hasattr(self.model, field_name):
-                column = getattr(self.model, field_name)
-                query = query.order_by(desc(column) if descending else asc(column))
-
-        return query

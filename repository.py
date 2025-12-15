@@ -208,6 +208,8 @@ class BaseRepository(Generic[T], BaseRepositoryMixin):
 
 
 class AsyncBaseRepository(Generic[T], BaseRepositoryMixin):
+    session: AsyncSession
+
     async def create(self, instance: T) -> T:
         return await self._add(instance)
 

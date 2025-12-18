@@ -2,7 +2,7 @@ from datetime import date, datetime as dt, timezone as tz
 import math
 from typing import Any, ClassVar, Generic, Optional, TypeVar
 
-from sqlalchemy import and_
+from sqlalchemy import and_, exists as sa_exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select, desc, asc, false
 from sqlmodel import Session, SQLModel, func, select
@@ -46,6 +46,14 @@ class ILike(Like):
     pass
 
 
+class Exists:
+    def __init__(self, query: Select[T]):
+        self.query = query
+
+    def __repr__(self):
+        return f"Exists({self.query!r})"
+
+
 class BaseRepositoryMixin:
     model: ClassVar[Optional[type[T]]] = None
 
@@ -63,7 +71,12 @@ class BaseRepositoryMixin:
     def _filter_clauses(self, model, **filters) -> list:
         clauses = []
         for field, value in filters.items():
-            if hasattr(model, field) and value is not None:
+            if value is None:
+                continue
+
+            if isinstance(value, Exists):
+                clauses.append(sa_exists(value.query))
+            elif hasattr(model, field):
                 column = getattr(model, field)
                 if isinstance(value, In):
                     if not value.items:
